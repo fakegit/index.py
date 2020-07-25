@@ -415,7 +415,7 @@
       
         <li class="md-nav__item">
   <a href="#openapi" class="md-nav__link">
-    OpenAPI文档
+    显示 OpenAPI 文档
   </a>
   
 </li>
@@ -535,7 +535,7 @@
       
         <li class="md-nav__item">
   <a href="#openapi" class="md-nav__link">
-    OpenAPI文档
+    显示 OpenAPI 文档
   </a>
   
 </li>
@@ -603,8 +603,8 @@
                 
                   <h1>OpenAPI</h1>
                 
-                <p>Index 使用 <a href="https://pydantic-docs.helpmanual.io/">pydantic</a> 用于更轻松的解析 HTTP 请求信息，并为之绑定了一套生成 OpenAPI 文档的程序。</p>
-<h2 id="openapi">OpenAPI文档</h2>
+                <p>Index 使用 <a href="https://pydantic-docs.helpmanual.io/">pydantic</a> 用于更轻松的解析 HTTP 请求信息，并为之绑定了一套生成 OpenAPI 文档的程序。这与 Index 核心并不是强耦合的，所以你可以选择使用，也可以选择不使用。</p>
+<h2 id="openapi">显示 OpenAPI 文档</h2>
 <p>将 <code>indexpy.openapi.application.OpenAPI</code> 挂载进 index 中。</p>
 <div class="codehilite"><pre><span></span><code><span class="kn">from</span> <span class="nn">indexpy</span> <span class="kn">import</span> <span class="n">Index</span>
 <span class="kn">from</span> <span class="nn">indexpy.openapi</span> <span class="kn">import</span> <span class="n">OpenAPI</span>
@@ -623,9 +623,24 @@
 <p>对于所有可处理 HTTP 请求的方法，它们的 <code>__doc__</code> 都会用于生成 OpenAPI 文档。</p>
 <p>第一行将被当作概要描述，所以尽量简明扼要，不要太长。</p>
 <p>空一行之后，后续的文字都会被当作详细介绍，被安置在 OpenAPI 文档中。</p>
+<p>例如：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span> <span class="nf">get</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    获取用户信息</span>
+
+<span class="sd">    此接口用于获取用户信息，然后我就不知道该编什么话了，总之这一段都是接口描述，而空的一行的上面是接口标题。</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="o">...</span>
+</code></pre></div>
+
+
 <h3 id="_2">请求</h3>
 <p>对于所有可处理 HTTP 请求的方法，均可以接受五种参数：<code>path</code>、<code>body</code>、<code>query</code>、<code>header</code>、<code>cookie</code>。</p>
 <p>使用继承自 <code>pydantic.BaseModel</code> 的类作为类型注解即可做到自动参数校验以及生成请求格式文档。</p>
+<div class="admonition notice">
+<p class="admonition-title">Notice</p>
+<p><code>path</code> 参数，如果标的类型是继承自 <code>pydantic.BaseModel</code>，它就使用对应类型，否则就是 <code>dict</code> 类型。</p>
+</div>
 <h3 id="_3">响应</h3>
 <p>为了描述不同状态码的响应结果，Index 使用装饰器描述，而不是类型注解。既可以使用 models 描述响应(仅支持 application/json)，亦可以直接传递 OpenAPI 文档字符串（当你不想返回一个 application/json 类型的响应时）。</p>
 <div class="admonition notice">
@@ -684,7 +699,8 @@
 
 
 <h2 id="tags">Tags</h2>
-<p>OpenAPI 的 Tags 是一个有用的功能，在 Index 里，你可以通过如下方式来指定 URL 的 tags</p>
+<p>OpenAPI 的 Tags 是一个有用的功能，在 Index 里，你可以通过如下方式来指定 URL 的分类标签。</p>
+<p><code>tags</code> 参数必须是一个 <code>dict</code> 类型，键为标签名。值需要包含 <code>description</code>，用于描述此标签；<code>paths</code> 是 URL 列表，如果 URL 包含路径参数，直接使用不带 <code>:type</code> 的字符串即可。</p>
 <div class="codehilite"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">mount_asgi</span><span class="p">(</span>
     <span class="s2">&quot;/openapi&quot;</span><span class="p">,</span>
     <span class="n">OpenAPI</span><span class="p">(</span>
