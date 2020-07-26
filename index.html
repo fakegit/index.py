@@ -403,18 +403,30 @@
       
 
 
+  <li class="md-nav__item">
+    <a href="background/" title="Background Task" class="md-nav__link">
+      Background Task
+    </a>
+  </li>
+
+    
+      
+      
+      
+
+
   <li class="md-nav__item md-nav__item--nested">
     
-      <input class="md-nav__toggle md-toggle" data-md-toggle="nav-13" type="checkbox" id="nav-13">
+      <input class="md-nav__toggle md-toggle" data-md-toggle="nav-14" type="checkbox" id="nav-14">
     
-    <label class="md-nav__link" for="nav-13">
+    <label class="md-nav__link" for="nav-14">
       设计与原理
       <span class="md-nav__icon md-icon">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8.59 16.58L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.42z"/></svg>
       </span>
     </label>
     <nav class="md-nav" aria-label="设计与原理" data-md-level="1">
-      <label class="md-nav__title" for="nav-13">
+      <label class="md-nav__title" for="nav-14">
         <span class="md-nav__icon md-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12z"/></svg>
         </span>
@@ -480,12 +492,11 @@
 <p>Index.py 有如下特性：</p>
 <ul>
 <li>灵活且高效的路由系统 (基于 Radix Tree)</li>
-<li>自动解析请求 &amp; 生成文档 (基于 pydantic)</li>
-<li>可视化 API 接口 (基于 ReDoc, 针对中文字体优化)</li>
-<li>现代化的测试组件 (基于 pytest 与 requests)</li>
-<li>非常简单的部署 (基于 uvicorn 与 gunicorn)</li>
+<li>自动解析请求 &amp; 生成文档 (基于 <code>pydantic</code>)</li>
+<li>可视化 API 接口 (基于 <code>ReDoc</code>, 针对中文字体优化)</li>
+<li>非常简单的部署 (基于 <code>uvicorn</code> 与 <code>gunicorn</code>)</li>
 <li>挂载 ASGI/WSGI 应用 (基于 <a href="https://github.com/abersheeran/a2wsgi/">a2wsgi</a>)</li>
-<li>更好用的 background tasks (基于 starlette)</li>
+<li>进程内后台任务 (基于 <code>asyncio</code>)</li>
 <li>可使用任何可用的 ASGI 生态</li>
 </ul>
 <p>Index.py 是率先使用 Radix Tree 进行路由查找的 Python web 框架。并借助 <code>uvicorn</code> 的强力驱动，拥有极高的裸性能。</p>
