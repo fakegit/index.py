@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
+import json
 import operator
 import sys
 import typing
 from copy import deepcopy
 from functools import reduce
+from hashlib import md5
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
@@ -19,7 +23,7 @@ if typing.TYPE_CHECKING:
 
 from indexpy.exceptions import RequestValidationError
 from indexpy.requests import request
-from indexpy.responses import HTMLResponse, HttpResponse, JSONResponse
+from indexpy.responses import HTMLResponse, JSONResponse
 from indexpy.routing import HttpRoute, Routes
 from indexpy.utils import F
 
@@ -105,14 +109,22 @@ class OpenAPI:
     ) -> Dict[str, Any]:
         result: Dict[str, Any] = {}
 
-        doc = func.__doc__
-        if isinstance(doc, str):
-            result.update(
-                zip(
-                    ("summary", "description"),
-                    doc.strip().split("\n\n", 1) | F(map, lambda i: i.strip()),
+        if getattr(func, "__summary__", None) | F(isinstance, ..., str):
+            result["summary"] = func.__summary__  # type: ignore
+
+        if getattr(func, "__description__", None) | F(isinstance, ..., str):
+            result["description"] = func.__description__  # type: ignore
+
+        if isinstance(func.__doc__, str):
+            clean_doc = inspect.cleandoc(func.__doc__)
+            if "summary" not in result and "description" not in result:
+                result.update(
+                    zip(("summary", "description"), clean_doc.split("\n\n", 1))
                 )
-            )
+            elif "description" not in result:
+                result["description"] = clean_doc
+            else:
+                result["summary"] = ""
 
         # generate params schema
         parameters = (
@@ -153,6 +165,8 @@ class OpenAPI:
         if result and path in self.path2tag:
             result["tags"] = self.path2tag[path]
 
+        result["tags"] = getattr(func, "__tags__", []) + result.get("tags", [])
+
         # merge user custom operation info
         return merge_openapi_info(
             result | F(lambda d: {k: v for k, v in d.items() if v}),
@@ -169,16 +183,42 @@ class OpenAPI:
             }
         ]
         openapi["paths"] = deepcopy(self._generate_paths(request.app, definitions))
-        openapi["definitions"] = deepcopy(definitions)
+        for path_obj in openapi["paths"].values():
+            for method_obj in path_obj.values():
+                if "responses" not in method_obj:
+                    method_obj["responses"] = {}
+        openapi["components"] = deepcopy(definitions)
         return openapi
 
     @property
     def routes(self) -> Routes:
-        async def template() -> HttpResponse:
+        async def redirect():
+            return request.url.replace(path=request.url.path + "/")
+
+        async def template():
             return HTMLResponse(self.html_template)
 
-        async def docs() -> HttpResponse:
+        async def json_docs():
             openapi = self.create_docs(request)
-            return JSONResponse(openapi)
+            return JSONResponse(
+                openapi, headers={"hash": md5(json.dumps(openapi).encode()).hexdigest()}
+            )
 
-        return Routes(HttpRoute("/", template), HttpRoute("/docs", docs))
+        async def heartbeat():
+            async def g():
+                openapi = self.create_docs(request)
+                yield {
+                    "id": md5(json.dumps(openapi).encode()).hexdigest(),
+                    "data": json.dumps(openapi),
+                }
+                while not request.app.should_exit:
+                    await asyncio.sleep(1)
+
+            return g()
+
+        return Routes(
+            HttpRoute("", redirect),
+            HttpRoute("/", template),
+            HttpRoute("/json", json_docs),
+            HttpRoute("/heartbeat", heartbeat),
+        )

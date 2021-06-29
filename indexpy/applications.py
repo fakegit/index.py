@@ -5,7 +5,21 @@ import dataclasses
 import inspect
 import sys
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+from functools import reduce
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
+
+from baize.typing import ASGIApp
 
 if sys.version_info[:2] < (3, 8):
     from typing_extensions import Literal
@@ -16,18 +30,20 @@ from baize.asgi import Receive, Scope, Send
 from baize.utils import cached_property
 
 from .debug import DebugMiddleware
-from .exceptions import ExceptionContextManager, HTTPException
+from .exceptions import ErrorView, ExceptionContextManager, HTTPException
 from .requests import HttpRequest, WebSocket, request_var, websocket_var
 from .responses import convert_response
 from .routing.routes import BaseRoute, NoMatchFound, Router
 from .templates import BaseTemplates
-from .utils import State
+from .utils import F, State
+
+NoArgumentCallable = Union[Callable[[], Any], Callable[[], Awaitable[Any]]]
 
 
 @dataclasses.dataclass
 class Lifespan:
-    on_startup: List[Callable[[], Any]] = dataclasses.field(default_factory=list)
-    on_shutdown: List[Callable[[], Any]] = dataclasses.field(default_factory=list)
+    on_startup: List[NoArgumentCallable] = dataclasses.field(default_factory=list)
+    on_shutdown: List[NoArgumentCallable] = dataclasses.field(default_factory=list)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """
@@ -67,7 +83,7 @@ class FactoryClass:
     websocket: Type[WebSocket] = WebSocket
 
 
-CallableObject = TypeVar("CallableObject", bound=Callable)
+T_NoArgumentCallable = TypeVar("T_NoArgumentCallable", bound=NoArgumentCallable)
 
 
 class Index:
@@ -76,20 +92,24 @@ class Index:
         *,
         debug: bool = False,
         templates: Optional[BaseTemplates] = None,
-        on_startup: List[Callable] = [],
-        on_shutdown: List[Callable] = [],
-        routes: List[BaseRoute] = [],
-        exception_handlers: Dict[Union[int, Type[Exception]], Callable] = {},
+        on_startup: List[NoArgumentCallable] = [],
+        on_shutdown: List[NoArgumentCallable] = [],
+        routes: Iterable[BaseRoute] = [],
+        exception_handlers: Dict[int | Type[Exception], ErrorView] = {},
         factory_class: FactoryClass = FactoryClass(),
     ) -> None:
+        self.should_exit = False
         self.__dict__["debug"] = debug
         self.factory_class = factory_class
         self.templates = templates
         self.router = Router(routes)
         self.lifespan = Lifespan(copy.copy(on_startup), copy.copy(on_shutdown))
         self.exception_contextmanager = ExceptionContextManager(exception_handlers)
+        self.asgi_middlewares: List[F] = []
         # We expect to be able to catch all code errors, so as an ASGI middleware.
-        self.app_with_debug = DebugMiddleware(app=self.app, debug=self.debug)
+        self.app_with_debug = DebugMiddleware(
+            app=self.build_app_with_middlewares(), debug=self.debug
+        )
 
     @property
     def debug(self) -> bool:
@@ -100,29 +120,37 @@ class Index:
         self.__dict__["debug"] = bool(value)
         self.app_with_debug.debug = bool(value)
 
+    def build_app_with_middlewares(self) -> ASGIApp:
+        return reduce(lambda a, m: m(a), self.asgi_middlewares, self.app)
+
+    def add_middleware(self, middleware_class: type, **options: Any) -> None:
+        """
+        Add ASGI middleware
+        """
+        self.asgi_middlewares.append(F(middleware_class, **options))
+        self.app_with_debug.app = self.build_app_with_middlewares()
+
     def add_exception_handler(
-        self,
-        exc_class_or_status_code: Union[int, Type[Exception]],
-        handler: Callable,
+        self, exc_class_or_status_code: int | Type[Exception], handler: ErrorView
     ) -> None:
         self.exception_contextmanager.add_exception_handler(
             exc_class_or_status_code, handler
         )
 
     def exception_handler(
-        self, exc_class_or_status_code: Union[int, Type[Exception]]
-    ) -> Callable[[CallableObject], CallableObject]:
-        def decorator(func: CallableObject) -> CallableObject:
+        self, exc_class_or_status_code: int | Type[Exception]
+    ) -> Callable[[ErrorView], ErrorView]:
+        def decorator(func: ErrorView) -> ErrorView:
             self.add_exception_handler(exc_class_or_status_code, func)
             return func
 
         return decorator
 
-    def on_startup(self, func: CallableObject) -> CallableObject:
+    def on_startup(self, func: T_NoArgumentCallable) -> T_NoArgumentCallable:
         self.lifespan.on_startup.append(func)
         return func
 
-    def on_shutdown(self, func: CallableObject) -> CallableObject:
+    def on_shutdown(self, func: T_NoArgumentCallable) -> T_NoArgumentCallable:
         self.lifespan.on_shutdown.append(func)
         return func
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import functools
 import inspect
 from itertools import groupby
@@ -13,7 +12,7 @@ from indexpy.exceptions import RequestValidationError
 from indexpy.requests import request
 from indexpy.utils import safe_issubclass
 
-from .fields import FieldInfo, RequestInfo
+from .fields import FieldInfo, RequestInfo, Undefined
 
 CallableObject = TypeVar("CallableObject", bound=Callable)
 
@@ -101,10 +100,7 @@ def parse_signature(function: CallableObject) -> CallableObject:
         parameters=[
             param
             for param in sig.parameters.values()
-            if (
-                not isinstance(param.default, FieldInfo)
-                or not isinstance(param.default, RequestInfo)
-            )
+            if not isinstance(param.default, (FieldInfo, RequestInfo))
         ],
         return_annotation=sig.return_annotation,
     )
@@ -173,11 +169,19 @@ async def verify_params(handler: CallableObject) -> CallableObject:
         # try to get request instance attributes
         if request_attrs:
             for name, info in request_attrs.items():
-                value: Any = functools.reduce(
-                    lambda attr, name: getattr(attr, name),
-                    (info.alias or name).split("."),
-                    request,
-                )
+                try:
+                    value: Any = functools.reduce(
+                        lambda attr, name: getattr(attr, name),
+                        (info.alias or name).split("."),
+                        request,
+                    )
+                except AttributeError:
+                    if info.default is not Undefined:
+                        value = info.default
+                    elif info.default_factory is not None:
+                        value = info.default_factory()
+                    else:
+                        raise
                 kwargs[name] = (await value) if inspect.isawaitable(value) else value
 
     except ValidationError as e:
@@ -202,15 +206,23 @@ def create_new_callback(callback: CallableObject) -> CallableObject:
     return callback_with_auto_bound_params  # type: ignore
 
 
+has_wrapped_by_auto_params = lambda function: (
+    hasattr(function, "__parameters__")
+    or hasattr(function, "__request_body__")
+    or hasattr(function, "__request_attrs__")
+)
+
+
 def auto_params(handler: CallableObject) -> CallableObject:
     if inspect.isclass(handler) and hasattr(handler, "__methods__"):
-        handler = copy.deepcopy(handler)
         for method in map(lambda x: x.lower(), handler.__methods__):  # type: ignore
-            callback = parse_signature(getattr(handler, method))
+            function = getattr(handler, method)
+            if has_wrapped_by_auto_params(function):
+                continue
+            callback = parse_signature(function)
             setattr(handler, method, create_new_callback(callback))
         return handler
     elif inspect.iscoroutinefunction(handler):
-        handler = copy.deepcopy(handler)
         callback = parse_signature(handler)
         return create_new_callback(callback)
     else:

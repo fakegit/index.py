@@ -1,8 +1,16 @@
 import asyncio
 from pathlib import Path as FilePath
 
-from indexpy import HTTPException, Index, Path, required_method, FileResponse
-from indexpy.routing import HttpRoute
+from indexpy import (
+    HTTPException,
+    HttpRoute,
+    Index,
+    Path,
+    SocketRoute,
+    required_method,
+    websocket,
+)
+from indexpy.openapi import OpenAPI
 
 
 async def homepage():
@@ -25,22 +33,29 @@ async def message():
 
     async def message_gen():
         for i in range(5):
-            await asyncio.sleep(1)
+            await asyncio.sleep(app.state.wait_time)
             yield {"id": i, "data": "hello"}
 
     return message_gen()
 
 
-@required_method("GET")
 async def sources(filepath: str = Path()):
     """
     Return source files
     """
     realpath = FilePath(".") / filepath.lstrip("./")
-    try:
-        return FileResponse(realpath)
-    except FileNotFoundError:
+    if realpath.exists() and realpath.is_file():
+        return realpath
+    else:
         raise HTTPException(404)
+
+
+async def ws():
+    await websocket.accept()
+    while not await websocket.is_disconnected():
+        await websocket.send_json({"data": "(^_^)"})
+        await asyncio.sleep(app.state.wait_time)
+    await websocket.close()
 
 
 app = Index(
@@ -49,6 +64,9 @@ app = Index(
         HttpRoute("/", homepage),
         HttpRoute("/exc", exc),
         HttpRoute("/message", message),
-        HttpRoute("/sources/{filepath:path}", sources),
+        HttpRoute("/sources/{filepath:path}", sources) @ required_method("GET"),
+        SocketRoute("/", ws),
     ],
 )
+app.router << "/docs" // OpenAPI("", "", "").routes
+app.state.wait_time = 1

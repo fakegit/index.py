@@ -152,7 +152,7 @@ class Cat(HttpView):
 
 - `await request.json`：将 `body` 作为 JSON 字符串解析并返回结果。
 
-- `await request.data`：将 `body` 根据 `content_type` 提供的信息进行解析并返回。
+- `await request.data()`：将 `body` 根据 `content_type` 提供的信息进行解析并返回。
 
 你也可以使用 `async for` 语法将 `body` 作为一个 `bytes` 流进行读取：
 
@@ -341,11 +341,11 @@ async def return_stream(scope, receive, send):
 
 异步传输文件作为响应。
 
-与其他响应类型相比，采用不同的参数进行实例化：
+与其他响应类型相比，它采用不同的参数进行实例化：
 
 * `filepath` - 要流式传输的文件的文件路径。
 * `headers` - 与 `Response` 中的 `headers` 参数的作用相同。
-* `media_type` - 文件的 MIME 媒体类型。如果未设置，则文件名或路径将用于推断媒体类型。
+* `content_type` - 文件的 MIME 媒体类型。如果未设置，则文件名或路径将用于推断媒体类型。
 * `download_name` - 如果设置此参数，它将包含在响应的 `Content-Disposition` 中。
 * `stat_result` - 接受一个 `os.stat_result` 对象，如果不传入则会自动使用 `os.stat(filepath)` 的结果。
 
@@ -411,48 +411,35 @@ async def message():
 !!! tip ""
     如果需要手动把函数的返回值转换为 `HttpResponse` 对象，则可以使用 `indexpy.responses.convert_response`。
 
-Index-py 内置了一些处理函数用于处理常见的类型：
+在下例中，视图函数返回一个 `dict` 对象，但客户端接收到的却是一个 JSON。这是因为 Index-py 内置了一些处理函数用于处理常见的类型：
+
+- `dict | tuple | list`：自动转换为 `JSONResponse`
+- `str | bytes`：自动转换为 `PlainTextResponse`
+- `typing.AsyncGeneratorType`：自动转换为 `SendEventResponse`
+- `pathlib.PurePath`：自动转换为 `FileResponse`
+- `baize.datastructures.URL`：自动转换为 `RedirectResponse`
 
 ```python
-@automatic.register(type(None))
-def _none(ret: typing.Type[None]) -> typing.NoReturn:
-    raise TypeError(
-        "Get 'None'. Maybe you need to add a return statement to the function."
-    )
-
-
-@automatic.register(tuple)
-@automatic.register(list)
-@automatic.register(dict)
-def _json(
-    body, status: int = 200, headers: typing.Mapping[str, str] = None
-) -> HttpResponse:
-    return JSONResponse(body, status, headers)
-
-
-@automatic.register(str)
-@automatic.register(bytes)
-def _plain_text(
-    body: typing.Union[str, bytes],
-    status: int = 200,
-    headers: typing.Mapping[str, str] = None,
-) -> HttpResponse:
-    return PlainTextResponse(body, status, headers)
-
-
-@automatic.register(AsyncGeneratorType)
-def _send_event(
-    generator: typing.AsyncGenerator[ServerSentEvent, None],
-    status: int = 200,
-    headers: typing.Mapping[str, str] = None,
-) -> HttpResponse:
-    return SendEventResponse(generator, status, headers)
+async def get_detail():
+    return {"key": "value"}
 ```
 
-同样的，你也可以自定义响应值的简化写法以统一项目的响应规范（哪怕有 `TypedDict`，Python 的 `Dict` 约束依旧很弱，但 dataclass 则有效得多），例如：
+你还可以返回多个值来自定义 HTTP Status 和 HTTP Headers：
+
+```python
+async def not_found():
+    return {"message": "Not found"}, 404
+
+
+async def no_content():
+    return "", 301, {"location": "https://index-py.aber.sh"}
+```
+
+同样的，你也可以自定义响应值的简化写法以统一项目的响应规范（哪怕有 `TypedDict`，Python 的 `Dict` 约束依旧很弱，但 dataclass 则有效得多），如下例所示，当你在视图函数里返回 `Error` 对象时，它都会自动被转换为 `JSONResponse`，并且状态码默认为 `400`：
 
 ```python
 from dataclasses import dataclass, asdict
+from typing import Mapping
 
 from indexpy.http.responses import automatic, HttpResponse, JSONResponse
 
@@ -465,8 +452,8 @@ class Error:
 
 
 @automatic.register(Error)
-def _error_json(error: Error, status: int = 400) -> HttpResponse:
-    return JSONResponse(asdict(error), status)
+def _error_json(error: Error, status: int = 400, headers: Mapping[str, str] = None) -> HttpResponse:
+    return JSONResponse(asdict(error), status, headers)
 ```
 
 或者你想覆盖默认的 `tuple`/`list`/`dict` 所对应的 `JSONResponse`：
@@ -514,6 +501,9 @@ async def endpoint():
     ...
 ```
 
+!!! tip ""
+    如果你想在 `lambda` 函数里抛出 `HTTPException`，则可以使用 `baize.exceptions.abort`。
+
 ### 自定义异常处理
 
 对于一些故意抛出的异常，Index-py 提供了方法进行统一处理。
@@ -527,12 +517,12 @@ app = Index()
 
 
 @app.exception_handler(404)
-def not_found(exc: HTTPException) -> HttpResponse:
+async def not_found(exc: HTTPException) -> HttpResponse:
     return PlainTextResponse("what do you want to do?", status_code=404)
 
 
 @app.exception_handler(ValueError)
-def value_error(exc: ValueError) -> HttpResponse:
+async def value_error(exc: ValueError) -> HttpResponse:
     return PlainTextResponse("Something went wrong with the server.", status_code=500)
 ```
 
@@ -542,11 +532,11 @@ def value_error(exc: ValueError) -> HttpResponse:
 from indexpy import Index, HTTPException, HttpResponse, PlainTextResponse
 
 
-def not_found(exc: HTTPException) -> HttpResponse:
+async def not_found(exc: HTTPException) -> HttpResponse:
     return PlainTextResponse("what do you want to do?", status_code=404)
 
 
-def value_error(exc: ValueError) -> HttpResponse:
+async def value_error(exc: ValueError) -> HttpResponse:
     return PlainTextResponse("Something went wrong with the server.", status_code=500)
 
 
@@ -555,3 +545,26 @@ app = Index(exception_handlers={
     ValueError: value_error,
 })
 ```
+
+## 内置中间件
+
+### CORS
+
+在现代浏览器中解决跨域问题一般使用 [Cross-Origin Resource Sharing](https://developer.mozilla.org/zh-CN/docs/Web/HTTP/CORS)，在 Index-py 使用如下代码即可快速配置 API 允许跨域。
+
+```python
+from indexpy import Routes
+from indexpy.middlewares import CORSMiddleware
+
+
+routes = Routes(..., http_middlewares=[CORSMiddleware()])
+```
+
+`CORSMiddleware` 有如下选项：
+
+- `allow_origins: Iterable[Pattern]`：允许的 Origin，需要 `re.compile` 预编译后的 `Pattern` 对象；默认值为 `(re.compile(".*"), )`
+- `allow_methods: Iterable[str]`：允许的请求方法；默认值为 `("GET"，"POST"，"PUT"，"PATCH"，"DELETE"，"HEAD"，"OPTIONS"，"TRACE")`。
+- `allow_headers: Iterable[str]`：允许的请求头，对应 [`Access-Control-Allow-Headers`](https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Headers/Access-Control-Allow-Headers)。
+- `expose_headers: Iterable[str]`：能在响应中列出的请求头，对应 [`Access-Control-Expose-Headers`](https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Headers/Access-Control-Expose-Headers)。
+- `allow_credentials: bool`：为真时则允许跨域请求携带 Cookies，反之不允许；默认为 `False`。
+- `max_age: int`：预请求的缓存时间；默认为 `600` 秒。

@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import abc
-import importlib
 import operator
-import os
 import sys
 import typing
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import reduce, update_wrapper
-from pathlib import Path
 
 if sys.version_info[:2] < (3, 8):
     from typing_extensions import Literal
@@ -19,7 +16,8 @@ else:
 from baize.routing import compile_path
 
 from indexpy.parameters import auto_params
-from indexpy.utils import F
+from indexpy.utils import FF, F
+from indexpy.views import required_method
 
 from .tree import RadixTree, RouteType
 
@@ -55,12 +53,14 @@ class BaseRoute:
     def __matmul__(self, decorator: typing.Callable[[T], T]):
         endpoint = self.endpoint
         self.endpoint = decorator(self.endpoint)
-        if not (getattr(self.endpoint, "__wrapped__", self.endpoint) is endpoint):
+        if not (hasattr(self.endpoint, "__wrapped__") or self.endpoint is endpoint):
             self.endpoint = update_wrapper(self.endpoint, endpoint)
         return self
 
     def __post_init__(self) -> None:
-        assert self.path.startswith("/"), "Route path must start with '/'"
+        assert (
+            self.path.startswith("/") or self.path == ""
+        ), "Route path must start with '/'"
         if self.name == "":
             self.name = self.endpoint.__name__
         self.endpoint = auto_params(self.endpoint)
@@ -79,6 +79,222 @@ class SocketRoute(BaseRoute):
 
 
 _RRMixinSelf = typing.TypeVar("_RRMixinSelf", bound="RouteRegisterMixin")
+View = typing.TypeVar("View", bound=typing.Callable)
+
+
+class HttpRegister:
+    def __init__(self, routes: RouteRegisterMixin) -> None:
+        self.__routes = routes
+
+    def _register_with_method(
+        self,
+        method: str,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+        summary: str = None,
+        description: str = None,
+        tags: typing.Iterable[str] = None,
+    ) -> typing.Callable[[View], View]:
+        """
+        if method == "any", all request method would be allowed.
+        """
+
+        def register(endpoint: View) -> View:
+            if summary:
+                setattr(endpoint, "__summary__", summary)
+
+            if description:
+                setattr(endpoint, "__description__", description)
+
+            if tags:
+                setattr(endpoint, "__tags__", list(tags))
+
+            route: HttpRoute = reduce(
+                operator.matmul, middlewares, HttpRoute(path, endpoint, name)
+            )
+            if method != "any":
+                route = route @ required_method(method.upper())
+
+            self.__routes << route
+            return endpoint
+
+        return register
+
+    def __call__(
+        self,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+        summary: str = None,
+        description: str = None,
+        tags: typing.Iterable[str] = None,
+    ) -> typing.Callable[[View], View]:
+        """
+        shortcut for `self << HttpRoute(path, endpoint, name)`
+
+        example:
+        ```python
+            @routes.http("/path", name="endpoint-name")
+            class Endpoint(HttpView): ...
+        ```
+        """
+        return self._register_with_method(
+            "any",
+            path,
+            name=name,
+            middlewares=middlewares,
+            summary=summary,
+            description=description,
+            tags=tags,
+        )
+
+    def get(
+        self,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+        summary: str = None,
+        description: str = None,
+        tags: typing.Iterable[str] = None,
+    ) -> typing.Callable[[View], View]:
+        """
+        shortcut for `self << HttpRoute(path, endpoint, name) @ required_method("GET")`
+
+        example:
+        ```python
+            @routes.http.get("/path", name="endpoint-name")
+            class Endpoint(HttpView): ...
+        ```
+        """
+        return self._register_with_method(
+            "get",
+            path,
+            name=name,
+            middlewares=middlewares,
+            summary=summary,
+            description=description,
+            tags=tags,
+        )
+
+    def post(
+        self,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+        summary: str = None,
+        description: str = None,
+        tags: typing.Iterable[str] = None,
+    ) -> typing.Callable[[View], View]:
+        """
+        shortcut for `self << HttpRoute(path, endpoint, name) @ required_method("POST")`
+
+        example:
+        ```python
+            @routes.http.post("/path", name="endpoint-name")
+            class Endpoint(HttpView): ...
+        ```
+        """
+        return self._register_with_method(
+            "post",
+            path,
+            name=name,
+            middlewares=middlewares,
+            summary=summary,
+            description=description,
+            tags=tags,
+        )
+
+    def put(
+        self,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+        summary: str = None,
+        description: str = None,
+        tags: typing.Iterable[str] = None,
+    ) -> typing.Callable[[View], View]:
+        """
+        shortcut for `self << HttpRoute(path, endpoint, name) @ required_method("PUT")`
+
+        example:
+        ```python
+            @routes.http.put("/path", name="endpoint-name")
+            class Endpoint(HttpView): ...
+        ```
+        """
+        return self._register_with_method(
+            "put",
+            path,
+            name=name,
+            middlewares=middlewares,
+            summary=summary,
+            description=description,
+            tags=tags,
+        )
+
+    def patch(
+        self,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+        summary: str = None,
+        description: str = None,
+        tags: typing.Iterable[str] = None,
+    ) -> typing.Callable[[View], View]:
+        """
+        shortcut for `self << HttpRoute(path, endpoint, name) @ required_method("PATCH")`
+
+        example:
+        ```python
+            @routes.http.patch("/path", name="endpoint-name")
+            class Endpoint(HttpView): ...
+        ```
+        """
+        return self._register_with_method(
+            "patch",
+            path,
+            name=name,
+            middlewares=middlewares,
+            summary=summary,
+            description=description,
+            tags=tags,
+        )
+
+    def delete(
+        self,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+        summary: str = None,
+        description: str = None,
+        tags: typing.Iterable[str] = None,
+    ) -> typing.Callable[[View], View]:
+        """
+        shortcut for `self << HttpRoute(path, endpoint, name) @ required_method("DELETE")`
+
+        example:
+        ```python
+            @routes.http.delete("/path", name="endpoint-name")
+            class Endpoint(HttpView): ...
+        ```
+        """
+        return self._register_with_method(
+            "delete",
+            path,
+            name=name,
+            middlewares=middlewares,
+            summary=summary,
+            description=description,
+            tags=tags,
+        )
 
 
 class RouteRegisterMixin(abc.ABC):
@@ -97,7 +313,7 @@ class RouteRegisterMixin(abc.ABC):
         elif isinstance(other, typing.Iterable):
             for route in other:
                 if isinstance(route, BaseRoute):
-                    if getattr(other, "namespace", None) is not None and route.name:
+                    if getattr(other, "namespace", "") and route.name:
                         route.name = getattr(other, "namespace") + ":" + route.name
                     route.extend_middlewares(other)
                 self << route
@@ -105,32 +321,31 @@ class RouteRegisterMixin(abc.ABC):
         else:
             return NotImplemented
 
-    def http(self, path: str, *, name: str = "") -> typing.Callable[[T], T]:
-        """
-        shortcut for `self << HttpRoute(path, endpoint, name, method)`
+    @property
+    def http(self) -> HttpRegister:
+        return HttpRegister(self)
 
-        example:
-            @routes.http("/path", name="endpoint-name")
-            class Endpoint(HttpView): ...
-        """
-
-        def register(endpoint: T) -> T:
-            self << HttpRoute(path, endpoint, name)
-            return endpoint
-
-        return register
-
-    def websocket(self, path: str, *, name: str = "") -> typing.Callable[[T], T]:
+    def websocket(
+        self,
+        path: str,
+        *,
+        name: str = "",
+        middlewares: typing.Iterable[typing.Callable[[View], View]] = [],
+    ) -> typing.Callable[[View], View]:
         """
         shortcut for `self << SocketRoute(path, endpoint, name)`
 
         example:
+        ```python
             @routes.websocket("/path", name="endpoint-name")
             class Endpoint(SocketView): ...
+        ```
         """
 
-        def register(endpoint: T) -> T:
-            self << SocketRoute(path, endpoint, name)
+        def register(endpoint: View) -> View:
+            self << reduce(
+                operator.matmul, middlewares, SocketRoute(path, endpoint, name)
+            )
             return endpoint
 
         return register
@@ -139,23 +354,43 @@ class RouteRegisterMixin(abc.ABC):
 _RoutesSelf = typing.TypeVar("_RoutesSelf", bound="Routes")
 
 
-class Routes(typing.Iterable[BaseRoute], RouteRegisterMixin):
+class Routes(typing.Sequence[BaseRoute], RouteRegisterMixin):
     def __init__(
         self,
         *iterable: typing.Union[BaseRoute, typing.Iterable[BaseRoute]],
         namespace: str = "",
+        tags: typing.Iterable[str] = None,
         http_middlewares: typing.Sequence[typing.Any] = [],
         socket_middlewares: typing.Sequence[typing.Any] = [],
     ) -> None:
         self.namespace = namespace
         self._list: typing.List[BaseRoute] = []
-        self._http_middlewares = list(http_middlewares)
+        self._http_middlewares = list(http_middlewares) + [
+            lambda endpoint: (
+                setattr(endpoint, "__tags__", list(tags)) if tags else None  # type: ignore
+            )
+            or endpoint
+        ]
         self._socket_middlewares = list(socket_middlewares)
         for route in iterable:
             self << route
 
-    def __iter__(self) -> typing.Iterator[BaseRoute]:
-        return iter(self._list)
+    @typing.overload
+    def __getitem__(self, index: int) -> BaseRoute:
+        ...
+
+    @typing.overload
+    def __getitem__(self, index: slice) -> typing.NoReturn:
+        ...
+
+    def __getitem__(self, index):
+        if isinstance(index, int):
+            return self._list[index]
+        else:
+            raise TypeError("Slicing syntax is not allowed")
+
+    def __len__(self) -> int:
+        return len(self._list)
 
     def append(self: _RoutesSelf, route: BaseRoute) -> _RoutesSelf:
         self._list.append(route)
@@ -174,13 +409,20 @@ class Routes(typing.Iterable[BaseRoute], RouteRegisterMixin):
         """
         self + routes
         """
-        return Routes(*self, *routes)
+        return Routes() << self << routes
 
     def __radd__(self, routes: typing.Iterable[BaseRoute]) -> Routes:
         """
         routes + self
         """
-        return Routes(*routes, *self)
+        return Routes() << routes << self
+
+    def __eq__(self, o: object) -> bool:
+        if not isinstance(o, typing.Sequence):
+            return NotImplemented
+        return len(o) == len(self) and all(
+            zip(self, o) | F(map, FF(lambda r, r_: r == r_))
+        )
 
     def http_middleware(self, middleware: T) -> T:
         """
@@ -259,6 +501,9 @@ class Router(RouteRegisterMixin):
                 f"Need type: `HttpRoute` or `SocketRoute`, but got type: {type(route)}"
             )
 
+        if route.path == "":
+            route.path = "/"
+
         if route.name in routes:
             raise ValueError(f"Duplicate route name: {route.name}")
 
@@ -312,75 +557,3 @@ class Router(RouteRegisterMixin):
                 for name, value in path_params.items()
             }
         )
-
-
-class FileRoutes(typing.Iterable[BaseRoute], RouteRegisterMixin):
-    def __init__(
-        self,
-        module_name: str,
-        *,
-        namespace: str = "",
-        allow_underline: bool = False,
-        suffix: str = "",
-    ) -> None:
-        dirpath = Path(
-            os.path.abspath(importlib.import_module(module_name).__file__)
-        ).parent
-        assert dirpath.name == module_name
-
-        self.namespace = namespace
-
-        for pypath in dirpath.glob("**/*.py"):
-            relpath = str(pypath.relative_to(dirpath)).replace("\\", "/")[:-3]
-
-            path_list = relpath.split("/")
-            path_list.insert(0, module_name)
-
-            url_path = "/" + relpath
-
-            if not allow_underline:
-                url_path = url_path.replace("_", "-")
-
-            if url_path.endswith("/index"):
-                url_path = url_path[: -len("index")]
-            else:
-                url_path = url_path + suffix
-
-            module = importlib.import_module(".".join(path_list))
-            url_name = getattr(module, "name", None)
-            get_response = getattr(module, "HTTP", None)
-            serve_socket = getattr(module, "Socket", None)
-
-            if get_response:
-                get_response = (
-                    range(len(path_list), 0, -1)
-                    | F(map, lambda deep: ".".join(path_list[:deep]))
-                    | F(map, lambda module_name: importlib.import_module(module_name))
-                    | F(map, lambda module: getattr(module, "HTTPMiddleware", None))
-                    | F(
-                        reduce,
-                        lambda handler, middleware: update_wrapper(
-                            middleware(handler), handler
-                        ),
-                        ...,
-                        get_response,
-                    )
-                )
-                self << HttpRoute(url_path, get_response, url_name)
-
-            if serve_socket:
-                serve_socket = (
-                    range(len(path_list), 0, -1)
-                    | F(map, lambda deep: ".".join(path_list[:deep]))
-                    | F(map, lambda module_name: importlib.import_module(module_name))
-                    | F(map, lambda module: getattr(module, "SocketMiddleware", None))
-                    | F(
-                        reduce,
-                        lambda handler, middleware: update_wrapper(
-                            middleware(handler), handler
-                        ),
-                        ...,
-                        serve_socket,
-                    )
-                )
-                self << SocketRoute(url_path, serve_socket, url_name)
