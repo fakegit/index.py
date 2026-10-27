@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 from decimal import Decimal
 from uuid import UUID
 
 import pytest
 
-from indexpy.routing.tree import RadixTree
+from kui.routing.tree import RadixTree
 
 
 @pytest.fixture
@@ -16,7 +18,7 @@ def tree():
     tree.append("/sayhi/{name}", ...)
     tree.append("/sayhi/{name}/suffix", ...)
     tree.append("/sayhi/{name}/avatar.{suffix}", ...)
-    tree.append("/path/{filepath:path}", ...)
+    tree.append("/path/{filepath:any}", ...)
     tree.append("/decimal/{number:decimal}", ...)
     tree.append("/uuid/{id:uuid}", ...)
 
@@ -59,11 +61,13 @@ def test_tree_fail_search(tree: RadixTree, path):
 @pytest.mark.parametrize(
     "path",
     [
-        "/path/{urlpath:path}/",
+        "/path/{urlpath:any}/",
         "/sayhi/{name:int}/suffix",
         "/sayhi/{hi}/suffix",
-        "/hello",
+        "/hello/{time:int}",
+        "",
         "a",
+        "/static/{filename}.py",
     ],
 )
 def test_tree_fail_add(tree, path):
@@ -72,18 +76,99 @@ def test_tree_fail_add(tree, path):
 
 
 def test_tree_iterator(tree: RadixTree):
-    for _0, _1 in zip(
-        tree.iterator(),
-        [
-            ("/hello", ...),
-            ("/hello/{time}", ...),
-            ("/hello/world", ...),
-            ("/sayhi/{name}", ...),
-            ("/sayhi/{name}/suffix", ...),
-            ("/sayhi/{name}/avatar.{suffix}", ...),
-            ("/path/{filepath}", ...),
-            ("/decimal/{number}", ...),
-            ("/uuid/{id}", ...),
-        ],
-    ):
-        assert _0 == _1
+    assert list(tree.iterator()) == [
+        ("/hello", ...),
+        ("/hello/world", ...),
+        ("/hello/{time}", ...),
+        ("/sayhi/{name}", ...),
+        ("/sayhi/{name}/suffix", ...),
+        ("/sayhi/{name}/avatar.{suffix}", ...),
+        ("/path/{filepath}", ...),
+        ("/decimal/{number}", ...),
+        ("/uuid/{id}", ...),
+    ]
+
+
+@pytest.mark.parametrize("static_path", ["/", "/users/me"])
+@pytest.mark.parametrize("static_first", [False, True])
+def test_static_route_stored_only_in_dict(static_path, static_first):
+    tree: RadixTree[str] = RadixTree()
+    dynamic_tree: RadixTree[str] = RadixTree()
+    dynamic_tree.append("/{path:any}", "dynamic")
+
+    if static_first:
+        tree.append(static_path, "static")
+    tree.append("/{path:any}", "dynamic")
+    if not static_first:
+        tree.append(static_path, "static")
+
+    static_route = (static_path, {}, "static")
+    assert tree.static_routes == {static_path: static_route}
+    assert tree.root == dynamic_tree.root
+    assert tree.search(static_path) == (static_route, {})
+    assert tree.search("/other") == dynamic_tree.search("/other")
+    assert list(tree.iterator()) == [
+        (static_path, "static"),
+        ("/{path}", "dynamic"),
+    ]
+
+
+@pytest.mark.parametrize("path", ["/", "/users/me"])
+def test_duplicate_static_route_raises_conflict(path):
+    tree: RadixTree[str] = RadixTree()
+    tree.append(path, "original")
+
+    with pytest.raises(ValueError, match=f"^Routing conflict: {path}$"):
+        tree.append(path, "duplicate")
+
+    assert tree.search(path) == ((path, {}, "original"), {})
+
+
+def test_static_preferred_over_dynamic_dynamic_first():
+    tree: RadixTree[str] = RadixTree()
+
+    tree.append("/users/{id}", "dynamic")
+    tree.append("/users/me", "static")
+
+    route, params = tree.search("/users/me")
+    assert route is not None
+    assert route[0] == "/users/me"
+    assert route[2] == "static"
+    assert params == {}
+
+
+def test_static_preferred_over_dynamic_static_first():
+    tree: RadixTree[str] = RadixTree()
+
+    tree.append("/users/me", "static")
+    tree.append("/users/{id}", "dynamic")
+
+    route, params = tree.search("/users/me")
+    assert route is not None
+    assert route[0] == "/users/me"
+    assert route[2] == "static"
+    assert params == {}
+
+
+def test_dynamic_still_matches_other_values():
+    tree: RadixTree[str] = RadixTree()
+    tree.append("/users/{id}", "dynamic")
+    tree.append("/users/me", "static")
+
+    route, params = tree.search("/users/42")
+    assert route is not None
+    assert route[0] == "/users/{id}"
+    assert route[2] == "dynamic"
+    assert params == {"id": "42"}
+
+
+def test_static_preferred_on_sibling_branch():
+    tree: RadixTree[str] = RadixTree()
+    tree.append("/files/{name}", "dynamic_file")
+    tree.append("/files/download", "static_download")
+
+    route, params = tree.search("/files/download")
+    assert route is not None
+    assert route[0] == "/files/download"
+    assert route[2] == "static_download"
+    assert params == {}

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link type="text/css" rel="stylesheet" href="//unpkg.com/swagger-editor@5.0.0-alpha.86/dist/swagger-editor.css">
+    <title>OpenAPI power by Kuí</title>
+</head>
+
+<body>
+    <div id="swagger-ui"></div>
+    <script src="//unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+    <script src="//unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js"></script>
+    <script>
+        const loadSwagger = (spec) => {
+            SwaggerUIBundle({
+                spec,
+                dom_id: '#swagger-ui',
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.SwaggerUIStandalonePreset
+                ],
+                layout: "BaseLayout",
+                deepLinking: true,
+                showExtensions: true,
+                showCommonExtensions: true,
+                persistAuthorization: true
+            })
+        }
+
+        (async () => {
+            const res = await fetch("./json");
+            const json = await res.json();
+            loadSwagger(json);
+
+            if (res.headers.get("reload") === "false") return;
+
+            // Auto reload
+            let version = res.headers.get("hash");
+            const evtSource = new EventSource("./heartbeat");
+            evtSource.onmessage = function (event) {
+                if (event.lastEventId === version) {
+                    return
+                }
+                version = event.lastEventId;
+                loadSwagger(JSON.parse(event.data))
+            }
+        })();
+
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,91 @@
+site_name: Kuí
+site_url: https://kui.aber.sh
+site_description: An easy-to-use web framework.
+
+# Repository
+repo_name: abersheeran/kui
+repo_url: https://github.com/abersheeran/kui
+edit_uri: blob/master/docs/docs/
+
+# Copyright
+copyright: Copyright &copy; 2023 by Kuí.
+
+# Configuration
+theme:
+  name: material
+  features:
+    - content.action.edit
+    - content.action.view
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+    - search.share
+    - navigation.tabs
+    - navigation.top
+    - navigation.expand
+
+# Plugins
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+      lang:
+        - zh
+        - en
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: zh
+          name: 简体中文
+          build: true
+
+# Customization
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/abersheeran
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/kui/
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+# Page tree
+nav:
+  - Home: index.md
+  - Basics:
+      - Routing: routing.md
+      - HTTP: http.md
+      - WebSocket: websocket.md
+  - Parameters & DI:
+      - Parameter Binding: parameters.md
+      - Dependency Injection: dependency-injection.md
+      - Security: security.md
+  - Features:
+      - Middleware: middleware.md
+      - OpenAPI Documentation: openapi.md
+      - Exception Handling: exceptions.md
+      - CORS: cors.md
+      - Lifespan: lifespan.md
+      - Background Tasks: background-tasks.md
+      - Templates: templates.md
+  - WSGI Mode: wsgi.md

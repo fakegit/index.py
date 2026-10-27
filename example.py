@@ -1,19 +1,26 @@
 import asyncio
 from pathlib import Path as FilePath
 
-from indexpy import HTTPException, Index, Path, required_method, FileResponse
-from indexpy.routing import HttpRoute
+from typing_extensions import Annotated
+
+from kui.asgi import (
+    HTTPException,
+    HttpRoute,
+    Kui,
+    OpenAPI,
+    Path,
+    SocketRoute,
+    allow_cors,
+    required_method,
+    websocket,
+)
 
 
 async def homepage():
     """
     Homepage
     """
-    return "hello, index.py"
-
-
-async def exc():
-    raise Exception("For get debug page.")
+    return "Kuí"
 
 
 async def message():
@@ -25,30 +32,41 @@ async def message():
 
     async def message_gen():
         for i in range(5):
-            await asyncio.sleep(1)
+            await asyncio.sleep(app.state.wait_time)
             yield {"id": i, "data": "hello"}
 
     return message_gen()
 
 
-@required_method("GET")
-async def sources(filepath: str = Path()):
+async def sources(filepath: Annotated[str, Path()]):
     """
     Return source files
     """
     realpath = FilePath(".") / filepath.lstrip("./")
-    try:
-        return FileResponse(realpath)
-    except FileNotFoundError:
+    if realpath.exists() and realpath.is_file():
+        return realpath
+    else:
         raise HTTPException(404)
 
 
-app = Index(
-    debug=True,
+async def ws():
+    await websocket.accept()
+    while not await websocket.is_disconnected():
+        await websocket.send_json({"data": "(^_^)"})
+        await asyncio.sleep(app.state.wait_time)
+    await websocket.close()
+
+
+app = Kui(
     routes=[
         HttpRoute("/", homepage),
-        HttpRoute("/exc", exc),
         HttpRoute("/message", message),
-        HttpRoute("/sources/{filepath:path}", sources),
+        HttpRoute("/sources/{filepath:any}", sources) @ required_method("GET"),
+        SocketRoute("/", ws),
+    ],
+    http_middlewares=[
+        allow_cors(),
     ],
 )
+app.router <<= "/docs" // OpenAPI(template_name="redoc").routes
+app.state.wait_time = 1
